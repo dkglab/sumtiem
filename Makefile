@@ -1,4 +1,4 @@
-.PHONY: all clean relock run serve watch
+.PHONY: all clean relock run serve deploy
 
 all: \
 	www/index.js \
@@ -13,6 +13,9 @@ run: www/index.js
 
 serve: build.cjs all
 	node $< serve
+
+deploy: build.cjs all
+	fly deploy
 
 relock:
 	rm -f package-lock.json

@@ -342,18 +342,13 @@ function renderVisualization(
 ) {
   element.innerHTML = ""
 
-  const scale = window.innerHeight / CANVAS.height
-
   if (DEBUG) {
-    status(scale)
+    status(1)
   }
 
-  const svg = SVG()
-    .addTo(element)
-    .size(Math.floor(window.innerWidth / 2), window.innerHeight)
-    .group()
-    .scale(scale)
-    .translate(Math.floor(MARGIN.left * scale), Math.floor(MARGIN.top * scale))
+  const svgEl = SVG().addTo(element)
+
+  const svg = svgEl.group().translate(MARGIN.left, MARGIN.top)
 
   const g = svg
     .group()
@@ -365,6 +360,14 @@ function renderVisualization(
   renderEvents(events, g)
   renderAxis(events, g)
   renderExtents(extents, g)
+
+  const bbox = svgEl.bbox()
+  svgEl.viewbox(
+    bbox.x - MARGIN.left,
+    bbox.y - MARGIN.top,
+    bbox.width + MARGIN.left + MARGIN.right,
+    bbox.height + MARGIN.top + MARGIN.bottom
+  )
 }
 
 function layoutExtentsAndEvents(resources: Resource[]): Intervals {

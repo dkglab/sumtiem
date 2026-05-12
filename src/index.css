@@ -19,6 +19,12 @@ body {
 #visualization {
     flex: 1;
 }
+#visualization svg {
+    display: block;
+    width: 55%;
+    height: auto;
+    margin: 0 auto;
+}
 .cm-lineNumbers {
     min-width: 3em;
 }

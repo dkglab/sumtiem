@@ -168,7 +168,14 @@ class Extent {
   column: number
   private _textBox: TextBox
 
-  static colors = ["#1b9e77", "#d95f02", "#7570b3"]
+  static colors = [
+    "#1b9e77",
+    "#d95f02",
+    "#7570b3",
+    "#e7298a",
+    "#66a61e",
+    "#e6ab02",
+  ]
 
   constructor(label: string, from: Event, to: Event) {
     this.label = label
@@ -440,28 +447,19 @@ function layoutExtentsAndEvents(resources: Resource[]): Intervals {
     }
   }
 
-  // set layout column on extents
-  let columnsChanged = true
-  while (columnsChanged) {
-    columnsChanged = false
-    for (const r of resources) {
-      if (r.types.has("sum:Extent") && r.objectProps.has("layoutRightOf")) {
-        const extent = extentsByID[r.id]
-        const column =
-          Math.max(
-            ...Array.from(r.objectProps.get("layoutRightOf")).map(
-              (r) => extentsByID[r.id].column
-            )
-          ) + 1
-        if (extent.column != column) {
-          extent.column = column
-          columnsChanged = true
-        }
-      }
+  const extents = Object.values(extentsByID)
+
+  const layoutRightOf = new Map<Extent, Extent[]>()
+  for (const r of resources) {
+    if (r.types.has("sum:Extent") && r.objectProps.has("layoutRightOf")) {
+      layoutRightOf.set(
+        extentsByID[r.id],
+        Array.from(r.objectProps.get("layoutRightOf")).map(
+          (p) => extentsByID[p.id]
+        )
+      )
     }
   }
-
-  const extents = Object.values(extentsByID)
 
   // resolve start and finish events for extents
   for (const e of extents) {
@@ -482,17 +480,79 @@ function layoutExtentsAndEvents(resources: Resource[]): Intervals {
     }, new Set<Event>())
   )
 
-  // sort events using layout order
-  function sortEvents(a: Event, b: Event): number {
-    if (a.layoutAbove.has(b)) {
-      return -1
-    } else if (b.layoutAbove.has(a)) {
-      return 1
-    } else {
-      return 0
+  // sort events using layout order (topological sort over layoutAbove,
+  // breaking ties by original insertion order)
+  const eventSet = new Set(events)
+  const origIndex = new Map<Event, number>(events.map((e, i) => [e, i]))
+  const inDegree = new Map<Event, number>(events.map((e) => [e, 0]))
+  for (const e of events) {
+    for (const below of e.layoutAbove) {
+      if (eventSet.has(below)) {
+        inDegree.set(below, inDegree.get(below)! + 1)
+      }
     }
   }
-  events.sort(sortEvents)
+  const sorted: Event[] = []
+  const queue: Event[] = events.filter((e) => inDegree.get(e) === 0)
+  while (queue.length > 0) {
+    let minIdx = 0
+    for (let i = 1; i < queue.length; i++) {
+      if (origIndex.get(queue[i])! < origIndex.get(queue[minIdx])!) minIdx = i
+    }
+    const e = queue.splice(minIdx, 1)[0]
+    sorted.push(e)
+    for (const below of e.layoutAbove) {
+      if (!eventSet.has(below)) continue
+      const d = inDegree.get(below)! - 1
+      inDegree.set(below, d)
+      if (d === 0) queue.push(below)
+    }
+  }
+  events.length = 0
+  events.push(...sorted)
+
+  // assign columns: topo-sort extents by layoutRightOf so each extent is
+  // placed after its parents, then greedily pick the lowest column where
+  // it doesn't share a y-range with any already-placed extent.
+  const eventIndex = new Map<Event, number>(events.map((e, i) => [e, i]))
+  const range = (e: Extent): [number, number] => [
+    eventIndex.get(e.from)!,
+    eventIndex.get(e.to)!,
+  ]
+  const overlaps = (a: Extent, b: Extent) => {
+    const [as, at] = range(a)
+    const [bs, bt] = range(b)
+    return Math.max(as, bs) <= Math.min(at, bt)
+  }
+  const extentIndeg = new Map<Extent, number>(extents.map((e) => [e, 0]))
+  const extentChildren = new Map<Extent, Set<Extent>>(
+    extents.map((e) => [e, new Set()])
+  )
+  for (const [e, parents] of layoutRightOf) {
+    for (const p of parents) {
+      extentChildren.get(p)!.add(e)
+      extentIndeg.set(e, extentIndeg.get(e)! + 1)
+    }
+  }
+  const placed = new Map<number, Extent[]>()
+  const extentQueue: Extent[] = extents.filter((e) => extentIndeg.get(e) === 0)
+  while (extentQueue.length > 0) {
+    const e = extentQueue.shift()!
+    const parents = layoutRightOf.get(e) ?? []
+    let column =
+      parents.length > 0 ? Math.max(...parents.map((p) => p.column)) + 1 : 0
+    while (placed.get(column)?.some((o) => overlaps(e, o))) {
+      column++
+    }
+    e.column = column
+    if (!placed.has(column)) placed.set(column, [])
+    placed.get(column)!.push(e)
+    for (const child of extentChildren.get(e)!) {
+      const d = extentIndeg.get(child)! - 1
+      extentIndeg.set(child, d)
+      if (d === 0) extentQueue.push(child)
+    }
+  }
 
   if (DEBUG) {
     for (const e of extents) {
